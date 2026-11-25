@@ -1,0 +1,13 @@
+name = "scriptless"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Privacy: no Workers Logs, no observability sampling, no tail consumers.
+[observability]
+enabled = false
+
+[[rules]]
+type = "Text"
+globs = ["**/*.css"]
+fallthrough = true
