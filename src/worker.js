@@ -58,7 +58,8 @@ function decode(buf, contentType) {
   }
 }
 
-async function safeFetch(input) {
+// opts: { json: true } also accepts JSON responses; { timeoutMs } overrides the default.
+async function safeFetch(input, opts = {}) {
   let u = validateTarget(input);
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     let res;
@@ -68,7 +69,7 @@ async function safeFetch(input) {
         redirect: 'manual',
         // A fresh request: no cookies, no referrer, nothing from the reader's own request.
         headers: BROWSER_HEADERS,
-        signal: AbortSignal.timeout(TIMEOUT_MS),
+        signal: AbortSignal.timeout(opts.timeoutMs || TIMEOUT_MS),
       });
     } catch (e) {
       if (e && e.name === 'TimeoutError') throw new FetchError('The site took too long to respond.', 504);
@@ -86,7 +87,7 @@ async function safeFetch(input) {
     }
     if (res.status >= 400) throw new FetchError(`The site answered with an error (${res.status}).`, 502, res.status);
     const type = (res.headers.get('content-type') || '').toLowerCase();
-    if (!/text\/html|application\/xhtml\+xml/.test(type)) {
+    if (!/text\/html|application\/xhtml\+xml/.test(type) && !(opts.json && /application\/json/.test(type))) {
       throw new FetchError('That address is not a web page (only HTML can be read).', 415);
     }
     return { url: u.href, html: decode(await readLimited(res), type) };

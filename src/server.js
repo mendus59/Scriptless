@@ -56,7 +56,7 @@ async function handleRead(req, res, rawUrl, fetchOpts) {
   if (active >= MAX_CONCURRENT) return send(res, 503, render.error('Scriptless is busy right now. Please try again in a moment.'), undefined, { 'Retry-After': '5' });
   active++;
   try {
-    const { url, html, archived } = await fetchWithFallback((u) => safeFetch(u, fetchOpts), normalizeInput(rawUrl));
+    const { url, html, archived } = await fetchWithFallback((u, o = {}) => safeFetch(u, { ...fetchOpts, ...o }), normalizeInput(rawUrl));
     send(res, 200, render.article(extract(html, url), url, { archived }));
   } catch (e) {
     const status = e instanceof FetchError ? e.status : 500;

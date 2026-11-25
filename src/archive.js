@@ -9,11 +9,20 @@ const { cleanUrl } = require('./clean-url');
 
 // Responses that mean "not you" rather than "no such page".
 const BLOCKED = new Set([401, 403, 429, 451, 503]);
+// The Archive is often slow; give it longer than a normal site.
+const ARCHIVE_TIMEOUT_MS = 25_000;
 
-function archiveUrl(url, now = new Date()) {
-  const ts = now.toISOString().replace(/\D/g, '').slice(0, 14);
+function stamp(now = new Date()) {
+  return now.toISOString().replace(/\D/g, '').slice(0, 14);
+}
+
+function archiveUrl(url, ts = stamp()) {
   // id_ asks for the page exactly as captured, without the Archive's toolbar.
   return `https://web.archive.org/web/${ts}id_/${url}`;
+}
+
+function lookupUrl(url) {
+  return `https://archive.org/wayback/available?url=${encodeURIComponent(url)}`;
 }
 
 function snapshotDate(finalUrl) {
@@ -21,11 +30,17 @@ function snapshotDate(finalUrl) {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 
+function reason(e) {
+  if (e instanceof FetchError) return e.upstreamStatus ? `error ${e.upstreamStatus}` : e.message.replace(/\.$/, '').toLowerCase();
+  return 'unreachable';
+}
+
 /**
- * fetchPage(url) -> { url, html }. Returns { url, html, archived } where archived is the
- * snapshot date (YYYY-MM-DD) when the Archive copy was used, otherwise null.
+ * fetchPage(url, { json, timeoutMs }) -> { url, html }.
+ * Returns { url, html, archived } where archived is the snapshot date (YYYY-MM-DD)
+ * when the Archive copy was used, otherwise null.
  */
-async function fetchWithFallback(fetchPage, input, now) {
+async function fetchWithFallback(fetchPage, input, now = new Date()) {
   try {
     const r = await fetchPage(input);
     return { ...r, archived: null };
@@ -33,17 +48,35 @@ async function fetchWithFallback(fetchPage, input, now) {
     if (!(e instanceof FetchError) || !BLOCKED.has(e.upstreamStatus)) throw e;
     const original = cleanUrl(input).href;
     const host = new URL(original).hostname.replace(/^www\./, '');
+    const refused = `${host} refused to let Scriptless read this page (error ${e.upstreamStatus})`;
+
+    // 1. Ask the Archive which snapshot is newest. If the lookup itself fails,
+    //    fall through and ask for the snapshot closest to now directly.
+    let ts = null;
+    let lookedUp = false;
     try {
-      const r = await fetchPage(archiveUrl(original, now));
-      return { url: original, html: r.html, archived: snapshotDate(r.url) || 'an unknown date' };
+      const r = await fetchPage(lookupUrl(original), { json: true, timeoutMs: ARCHIVE_TIMEOUT_MS });
+      const closest = JSON.parse(r.html)?.archived_snapshots?.closest;
+      lookedUp = true;
+      if (closest && closest.available && /^\d{14}$/.test(closest.timestamp)) ts = closest.timestamp;
     } catch {
+      lookedUp = false;
+    }
+    if (lookedUp && !ts) {
+      throw new FetchError(`${refused}, and the Internet Archive has no copy of it yet. Some publishers block reader services like this one.`, 502);
+    }
+
+    // 2. Read that snapshot (or the one closest to now, if the lookup failed).
+    try {
+      const r = await fetchPage(archiveUrl(original, ts || stamp(now)), { timeoutMs: ARCHIVE_TIMEOUT_MS });
+      return { url: original, html: r.html, archived: snapshotDate(r.url) || 'an unknown date' };
+    } catch (archiveErr) {
       throw new FetchError(
-        `${host} refused to let Scriptless read this page (error ${e.upstreamStatus}), and the Internet Archive has no copy of it. ` +
-        'Some publishers block reader services like this one.',
+        `${refused}, and the Internet Archive copy could not be loaded either (${reason(archiveErr)}). Some publishers block reader services like this one.`,
         502,
       );
     }
   }
 }
 
-module.exports = { fetchWithFallback, archiveUrl, snapshotDate, BLOCKED };
+module.exports = { fetchWithFallback, archiveUrl, lookupUrl, snapshotDate, BLOCKED };
