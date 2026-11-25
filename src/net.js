@@ -63,7 +63,7 @@ function requestOnce(u, opts) {
         return reject(new FetchError(`The site answered with an error (${res.statusCode}).`, 502, res.statusCode));
       }
       const type = String(res.headers['content-type'] || '').toLowerCase();
-      if (!/text\/html|application\/xhtml\+xml/.test(type)) {
+      if (!/text\/html|application\/xhtml\+xml/.test(type) && !(opts.json && /application\/json/.test(type))) {
         clearTimeout(timer);
         res.resume();
         return reject(new FetchError('That address is not a web page (only HTML can be read).', 415));

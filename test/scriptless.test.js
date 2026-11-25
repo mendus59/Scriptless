@@ -131,29 +131,57 @@ test('static Pages build points forms at the Worker and ships no scripts', () =>
 });
 
 test('blocked sites fall back to the Internet Archive copy', async () => {
-  const { fetchWithFallback, archiveUrl } = require('../src/archive');
+  const { fetchWithFallback, archiveUrl, lookupUrl } = require('../src/archive');
   const { FetchError } = require('../src/target');
   const now = new Date('2026-11-25T07:30:00Z');
-  const asked = [];
-  const fake = async (u) => {
-    asked.push(u);
-    if (u.startsWith('https://news.example/')) throw new FetchError('blocked', 502, 403);
-    return { url: 'https://web.archive.org/web/20261117083000id_/https://news.example/story', html: '<p>archived</p>' };
-  };
-  const r = await fetchWithFallback(fake, 'https://news.example/story?utm_source=x', now);
+  const snap = 'https://web.archive.org/web/20261117083000id_/https://news.example/story';
+  const blockedSite = (u) => { if (/^https:\/\/(www\.)?news\.example\//.test(u)) throw new FetchError('blocked', 502, 403); };
+
+  // Lookup finds a snapshot, which is then read.
+  let asked = [];
+  let r = await fetchWithFallback(async (u, o = {}) => {
+    asked.push([u, !!o.json]);
+    blockedSite(u);
+    if (u === lookupUrl('https://news.example/story')) {
+      return { url: u, html: JSON.stringify({ archived_snapshots: { closest: { available: true, timestamp: '20261117083000' } } }) };
+    }
+    return { url: u, html: '<p>archived</p>' };
+  }, 'https://news.example/story?utm_source=x', now);
   assert.equal(r.archived, '2026-11-17');
   assert.equal(r.url, 'https://news.example/story');
   assert.equal(r.html, '<p>archived</p>');
-  assert.deepEqual(asked, ['https://news.example/story?utm_source=x', archiveUrl('https://news.example/story', now)]);
-  assert.equal(archiveUrl('https://news.example/story', now), 'https://web.archive.org/web/20261125073000id_/https://news.example/story');
+  assert.deepEqual(asked, [
+    ['https://news.example/story?utm_source=x', false],
+    [lookupUrl('https://news.example/story'), true],
+    [snap, false],
+  ]);
+
+  // Lookup itself fails: try the snapshot closest to now directly.
+  asked = [];
+  r = await fetchWithFallback(async (u) => {
+    asked.push(u);
+    blockedSite(u);
+    if (u.startsWith('https://archive.org/')) throw new FetchError('slow', 504);
+    return { url: snap, html: '<p>archived</p>' };
+  }, 'https://news.example/story', now);
+  assert.equal(asked[2], archiveUrl('https://news.example/story', '20261125073000'));
+  assert.equal(r.archived, '2026-11-17');
+
+  // Archive has no copy.
+  await assert.rejects(fetchWithFallback(async (u) => {
+    blockedSite(u);
+    return { url: u, html: '{"archived_snapshots":{}}' };
+  }, 'https://www.news.example/x'), /news\.example refused .*no copy of it yet/);
+
+  // Archive copy exists but cannot be loaded: say why.
+  await assert.rejects(fetchWithFallback(async (u) => {
+    blockedSite(u);
+    if (u.startsWith('https://archive.org/')) return { url: u, html: '{"archived_snapshots":{"closest":{"available":true,"timestamp":"20261117083000"}}}' };
+    throw new FetchError('x', 502, 403);
+  }, 'https://news.example/story'), /Internet Archive copy could not be loaded either \(error 403\)/);
 
   // A page that simply does not exist is not retried through the Archive.
-  const notFound = async () => { throw new FetchError('missing', 502, 404); };
-  await assert.rejects(fetchWithFallback(notFound, 'https://news.example/x'), /missing/);
-
-  // Blocked and not archived: a clear message naming the site.
-  const neither = async () => { throw new FetchError('blocked', 502, 403); };
-  await assert.rejects(fetchWithFallback(neither, 'https://www.news.example/x'), /news\.example refused .*Internet Archive has no copy/);
+  await assert.rejects(fetchWithFallback(async () => { throw new FetchError('missing', 502, 404); }, 'https://news.example/x'), /missing/);
 });
 
 test('archived pages say so', () => {
