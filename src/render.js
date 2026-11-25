@@ -61,6 +61,8 @@ function about(links) {
 <p>A plain page of text made on the server. It contains no JavaScript, and a strict Content Security Policy forbids scripts, frames, images, fonts and connections to any other site, so even a mistake in the extractor cannot load anything.</p>
 <h2>What is kept</h2>
 <p>Nothing. There are no accounts, no cookies, no analytics and no access logs. Pages are not cached. Tracking parameters such as <code>utm_source</code>, <code>fbclid</code> and <code>gclid</code> are removed from every link before it is fetched or shown.</p>
+<h2>When a site refuses</h2>
+<p>Some publishers block requests from servers like this one. When that happens, Scriptless reads the Internet Archive's most recent copy of the page instead and tells you so. The Archive sees which page was requested, but not who asked.</p>
 <h2>Links inside articles</h2>
 <p>Links are rewritten to open through Scriptless too, so following them stays private. Images are replaced by their description.</p>
 <h2>Limits</h2>
@@ -68,18 +70,21 @@ function about(links) {
 </article>`, { links });
 }
 
-function article(a, url) {
+function article(a, url, { archived = null } = {}) {
   const host = new URL(url).hostname.replace(/^www\./, '');
   const meta = [a.byline, a.siteName && a.siteName !== host ? a.siteName : '', a.published ? a.published.slice(0, 10) : '']
     .filter(Boolean).map(esc).join(' · ');
   const minutes = Math.max(1, Math.round(a.textLength / 1200));
   const empty = a.textLength < 40
     ? '<p class="note">Very little text was found. This page may build its content with JavaScript, or sit behind a login.</p>' : '';
+  const archivedNote = archived
+    ? `<p class="note">${esc(host)} would not let Scriptless read this page, so this is the Internet Archive's copy from ${esc(archived)}. It may be out of date.</p>` : '';
   return layout(a.title + ' · Scriptless', `
 <article class="prose">
   <p class="source">${esc(host)} · ${minutes} min read</p>
   <h1>${esc(a.title)}</h1>
   ${meta ? `<p class="meta">${meta}</p>` : ''}
+  ${archivedNote}
   ${empty}
   <div class="content">${a.content}</div>
   <p class="orig">Original: <a href="${esc(url)}" rel="noreferrer noopener" referrerpolicy="no-referrer">${esc(url)}</a> <span class="warn">(opens the real site, which can see you)</span></p>

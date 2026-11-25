@@ -6,7 +6,7 @@ const http = require('node:http');
 const https = require('node:https');
 const dns = require('node:dns');
 const zlib = require('node:zlib');
-const { FetchError, isPublicAddress, validateTarget, ALLOWED_PORTS } = require('./target');
+const { FetchError, BROWSER_HEADERS, isPublicAddress, validateTarget, ALLOWED_PORTS } = require('./target');
 
 const DEFAULTS = {
   timeoutMs: 10_000,
@@ -15,9 +15,6 @@ const DEFAULTS = {
   allowedPorts: ALLOWED_PORTS,
   allowPrivate: false, // only ever true in tests
 };
-
-// A generic, common user agent so the target cannot single out this service's users.
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0';
 
 /**
  * DNS lookup used at connect time. Checking here (rather than before the request)
@@ -44,15 +41,8 @@ function requestOnce(u, opts) {
       method: 'GET',
       lookup: makeLookup(opts),
       agent: false, // no connection reuse between users
-      headers: {
-        'User-Agent': UA,
-        Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        // No Cookie, no Referer, no client IP forwarding headers. Ever.
-        DNT: '1',
-        'Sec-GPC': '1',
-      },
+      // No Cookie, no Referer, no client IP forwarding headers. Ever.
+      headers: { ...BROWSER_HEADERS, 'Accept-Encoding': 'gzip, deflate, br' },
       timeout: opts.timeoutMs,
     });
     const timer = setTimeout(() => req.destroy(new FetchError('The site took too long to respond.', 504)), opts.timeoutMs);
@@ -70,7 +60,7 @@ function requestOnce(u, opts) {
       if (res.statusCode >= 400) {
         clearTimeout(timer);
         res.resume();
-        return reject(new FetchError(`The site answered with an error (${res.statusCode}).`, 502));
+        return reject(new FetchError(`The site answered with an error (${res.statusCode}).`, 502, res.statusCode));
       }
       const type = String(res.headers['content-type'] || '').toLowerCase();
       if (!/text\/html|application\/xhtml\+xml/.test(type)) {
