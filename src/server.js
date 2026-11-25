@@ -6,6 +6,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { safeFetch, FetchError } = require('./net');
+const { fetchWithFallback } = require('./archive');
 const { extract } = require('./extract');
 const render = require('./render');
 
@@ -55,9 +56,8 @@ async function handleRead(req, res, rawUrl, fetchOpts) {
   if (active >= MAX_CONCURRENT) return send(res, 503, render.error('Scriptless is busy right now. Please try again in a moment.'), undefined, { 'Retry-After': '5' });
   active++;
   try {
-    const { url, html } = await safeFetch(normalizeInput(rawUrl), fetchOpts);
-    const a = extract(html, url);
-    send(res, 200, render.article(a, url));
+    const { url, html, archived } = await fetchWithFallback((u) => safeFetch(u, fetchOpts), normalizeInput(rawUrl));
+    send(res, 200, render.article(extract(html, url), url, { archived }));
   } catch (e) {
     const status = e instanceof FetchError ? e.status : 500;
     const msg = e instanceof FetchError ? e.message : 'Something went wrong while reading that page.';

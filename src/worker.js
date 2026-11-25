@@ -4,7 +4,8 @@
 // Workers cannot reach private networks, and every redirect hop is re-validated here,
 // so the SSRF rules from the Node server still hold.
 
-import { validateTarget, FetchError } from './target.js';
+import { validateTarget, FetchError, BROWSER_HEADERS } from './target.js';
+import { fetchWithFallback } from './archive.js';
 import { extract } from './extract.js';
 import * as render from './render.js';
 import { SECURITY_HEADERS } from './headers.js';
@@ -13,7 +14,6 @@ import CSS from '../public/style.css';
 const TIMEOUT_MS = 10_000;
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0';
 
 function respond(body, status = 200, type = 'text/html; charset=utf-8', extra = {}) {
   return new Response(body, {
@@ -67,13 +67,7 @@ async function safeFetch(input) {
         method: 'GET',
         redirect: 'manual',
         // A fresh request: no cookies, no referrer, nothing from the reader's own request.
-        headers: {
-          'User-Agent': UA,
-          Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.1',
-          'Accept-Language': 'en-US,en;q=0.5',
-          DNT: '1',
-          'Sec-GPC': '1',
-        },
+        headers: BROWSER_HEADERS,
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch (e) {
@@ -90,7 +84,7 @@ async function safeFetch(input) {
       u = validateTarget(next.href);
       continue;
     }
-    if (res.status >= 400) throw new FetchError(`The site answered with an error (${res.status}).`, 502);
+    if (res.status >= 400) throw new FetchError(`The site answered with an error (${res.status}).`, 502, res.status);
     const type = (res.headers.get('content-type') || '').toLowerCase();
     if (!/text\/html|application\/xhtml\+xml/.test(type)) {
       throw new FetchError('That address is not a web page (only HTML can be read).', 415);
@@ -109,8 +103,8 @@ function normalizeInput(raw) {
 
 async function handleRead(raw) {
   try {
-    const { url, html } = await safeFetch(normalizeInput(raw));
-    return respond(render.article(extract(html, url), url));
+    const { url, html, archived } = await fetchWithFallback(safeFetch, normalizeInput(raw));
+    return respond(render.article(extract(html, url), url, { archived }));
   } catch (e) {
     const fe = e instanceof FetchError;
     return respond(render.error(fe ? e.message : 'Something went wrong while reading that page.'), fe ? e.status : 500);

@@ -129,3 +129,36 @@ test('static Pages build points forms at the Worker and ships no scripts', () =>
     env: { ...process.env, SCRIPTLESS_WORKER_URL: 'http://insecure.example' }, stdio: 'pipe',
   }));
 });
+
+test('blocked sites fall back to the Internet Archive copy', async () => {
+  const { fetchWithFallback, archiveUrl } = require('../src/archive');
+  const { FetchError } = require('../src/target');
+  const now = new Date('2026-11-25T07:30:00Z');
+  const asked = [];
+  const fake = async (u) => {
+    asked.push(u);
+    if (u.startsWith('https://news.example/')) throw new FetchError('blocked', 502, 403);
+    return { url: 'https://web.archive.org/web/20261117083000id_/https://news.example/story', html: '<p>archived</p>' };
+  };
+  const r = await fetchWithFallback(fake, 'https://news.example/story?utm_source=x', now);
+  assert.equal(r.archived, '2026-11-17');
+  assert.equal(r.url, 'https://news.example/story');
+  assert.equal(r.html, '<p>archived</p>');
+  assert.deepEqual(asked, ['https://news.example/story?utm_source=x', archiveUrl('https://news.example/story', now)]);
+  assert.equal(archiveUrl('https://news.example/story', now), 'https://web.archive.org/web/20261125073000id_/https://news.example/story');
+
+  // A page that simply does not exist is not retried through the Archive.
+  const notFound = async () => { throw new FetchError('missing', 502, 404); };
+  await assert.rejects(fetchWithFallback(notFound, 'https://news.example/x'), /missing/);
+
+  // Blocked and not archived: a clear message naming the site.
+  const neither = async () => { throw new FetchError('blocked', 502, 403); };
+  await assert.rejects(fetchWithFallback(neither, 'https://www.news.example/x'), /news\.example refused .*Internet Archive has no copy/);
+});
+
+test('archived pages say so', () => {
+  const render = require('../src/render');
+  const html = render.article({ title: 'T', content: '<p>x</p>', textLength: 500 }, 'https://news.example/a', { archived: '2026-11-17' });
+  assert.match(html, /Internet Archive's copy from 2026-11-17/);
+  assert.doesNotMatch(render.article({ title: 'T', content: '<p>x</p>', textLength: 500 }, 'https://news.example/a'), /Internet Archive/);
+});

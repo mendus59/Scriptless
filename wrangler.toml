@@ -11,3 +11,7 @@ enabled = false
 type = "Text"
 globs = ["**/*.css"]
 fallthrough = true
+
+# Lets Cloudflare Workers Builds create preview deployments for pull requests
+# (`wrangler preview`). Empty on purpose: previews inherit the settings above.
+[previews]

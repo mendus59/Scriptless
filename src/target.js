@@ -7,11 +7,28 @@ const { cleanUrl } = require('./clean-url');
 const ALLOWED_PORTS = new Set(['', '80', '443']);
 
 class FetchError extends Error {
-  constructor(message, status = 502) {
+  constructor(message, status = 502, upstreamStatus = null) {
     super(message);
     this.status = status;
+    this.upstreamStatus = upstreamStatus; // the target site's HTTP status, when it sent one
   }
 }
+
+// Sent with every page request: the headers a current Firefox sends for a normal page load,
+// so readers blend in and sites that sniff for bots are less likely to refuse.
+// Nothing here comes from the reader's own request.
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+  Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.5',
+  'Upgrade-Insecure-Requests': '1',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-User': '?1',
+  DNT: '1',
+  'Sec-GPC': '1',
+};
 
 /** True only for globally routable unicast addresses. */
 function isPublicAddress(address) {
@@ -52,4 +69,4 @@ function validateTarget(input, opts = { allowedPorts: ALLOWED_PORTS, allowPrivat
   return u;
 }
 
-module.exports = { FetchError, isPublicAddress, validateTarget, ALLOWED_PORTS };
+module.exports = { FetchError, BROWSER_HEADERS, isPublicAddress, validateTarget, ALLOWED_PORTS };
