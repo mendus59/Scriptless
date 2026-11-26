@@ -1,5 +1,8 @@
 # Scriptless
 
+<!-- site-screenshot: docs/screenshot.jpg -->
+![Screenshot of Scriptless](docs/screenshot.jpg)
+
 Paste a link, get only the words. Scriptless fetches a page on the server, pulls out the
 readable article, and sends your browser a plain page of text. No scripts, ads, trackers,
 cookies, images, fonts or frames from the original site ever reach you, and the site never
