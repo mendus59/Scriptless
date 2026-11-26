@@ -190,3 +190,46 @@ test('archived pages say so', () => {
   assert.match(html, /Internet Archive's copy from 2026-11-17/);
   assert.doesNotMatch(render.article({ title: 'T', content: '<p>x</p>', textLength: 500 }, 'https://news.example/a'), /Internet Archive/);
 });
+
+test('robot-check pages are recognised', () => {
+  const { botWall } = require('../src/walls');
+  assert.ok(botWall('https://www.bloomberg.com/tosv2.html?vid=&uuid=x&url=L29waW5pb24=', '<html></html>'));
+  assert.ok(botWall('https://x.example/a', '<html><head><title>Are you a robot?</title></head><body>Please click</body></html>'));
+  assert.ok(botWall('https://x.example/a', '<html><head><title>Just a moment...</title></head></html>'));
+  assert.ok(botWall('https://x.example/a', '<div id="px-captcha"></div>'));
+  assert.equal(botWall('https://x.example/a', '<html><head><title>Why robots are coming for your job</title></head><body>text</body></html>'), null);
+});
+
+test('a 200 robot check falls back to the Archive, and a captured robot check is an error', async () => {
+  const { fetchWithFallback, lookupUrl } = require('../src/archive');
+  const wall = '<html><head><title>Are you a robot?</title></head><body>We\'ve detected unusual activity</body></html>';
+  const lookup = { url: '', html: '{"archived_snapshots":{"closest":{"available":true,"timestamp":"20261125120000"}}}' };
+  const page = 'https://www.bloomberg.com/opinion/articles/x';
+  const site = (u) => (u === page ? { url: 'https://www.bloomberg.com/tosv2.html?vid=&url=x', html: wall } : null);
+
+  const r = await fetchWithFallback(async (u) => site(u) || (u === lookupUrl(page) ? lookup
+    : { url: `https://web.archive.org/web/20261125120000id_/${page}`, html: '<p>archived</p>' }), page);
+  assert.equal(r.archived, '2026-11-25');
+  assert.equal(r.html, '<p>archived</p>');
+
+  await assert.rejects(fetchWithFallback(async (u) => site(u) || (u === lookupUrl(page) ? lookup
+    : { url: `https://web.archive.org/web/20261125120000id_/${page}`, html: wall }), page),
+  /bloomberg\.com answered Scriptless with a robot check .*Internet Archive only saved that same robot check/);
+});
+
+test('subscriber-only articles say so, and free JSON-LD articleBody fills in JS-rendered pages', () => {
+  const render = require('../src/render');
+  const ld = (o) => `<script type="application/ld+json">${JSON.stringify(o).replace(/</g, "\\u003c")}</script>`;
+  const body = 'Full paragraph of the real story that only lives in structured data. '.repeat(12);
+
+  const paid = extract(`<html><head><title>P</title>${ld({ '@type': 'NewsArticle', isAccessibleForFree: 'False', articleBody: body })}</head><body><p>Teaser.</p></body></html>`, 'https://news.example/p');
+  assert.equal(paid.paywalled, true);
+  assert.ok(!paid.content.includes('only lives in structured data'), 'paywalled articleBody must not be used');
+  assert.match(render.article(paid, 'https://news.example/p'), /subscriber-only article/);
+
+  const js = extract(`<html><head><title>J</title>${ld({ '@graph': [{ '@type': 'NewsArticle', articleBody: body + '<script>x()</script>' }] })}</head><body><div id="root"></div></body></html>`, 'https://news.example/j');
+  assert.equal(js.paywalled, false);
+  assert.ok(js.content.includes('only lives in structured data'));
+  assert.ok(!/<script|x\(\)/.test(js.content));
+  assert.doesNotMatch(render.article(js, 'https://news.example/j'), /subscriber-only/);
+});

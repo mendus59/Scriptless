@@ -6,6 +6,7 @@ const { parseHTML } = require('linkedom');
 const { Readability } = require('@mozilla/readability');
 const sanitizeHtml = require('sanitize-html');
 const { cleanUrl } = require('./clean-url');
+const { isPaywalled, jsonLd } = require('./walls');
 
 const ALLOWED_TAGS = [
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr', 'blockquote', 'pre', 'code',
@@ -80,7 +81,21 @@ function extract(html, url) {
     content = sanitize(paras.map((p) => `<p>${sanitizeHtml(p, { allowedTags: [] })}</p>`).join('\n'), url);
   }
 
+  // Pages that build their text with JavaScript often still ship the full article as
+  // schema.org articleBody for search engines. Use it when it is clearly more complete,
+  // but never for articles the publisher marks as subscriber-only.
+  const paywalled = isPaywalled(html);
+  if (!paywalled) {
+    const body = jsonLd(html).map((o) => (typeof o.articleBody === 'string' ? o.articleBody : '')).sort((x, y) => y.length - x.length)[0] || '';
+    const have = textOnly(content).length;
+    if (body.length > 500 && body.length > have * 1.5) {
+      const paras = textOnly(body).split(/\n\s*\n+|\n/).map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean);
+      content = sanitize(paras.map((p) => `<p>${sanitizeHtml(p, { allowedTags: [] })}</p>`).join('\n'), url);
+    }
+  }
+
   return {
+    paywalled,
     title: textOnly(article?.title || fallbackTitle) || 'Untitled page',
     byline: textOnly(article?.byline),
     siteName: textOnly(article?.siteName),
